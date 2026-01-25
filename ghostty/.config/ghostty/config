@@ -12,5 +12,5 @@ background-blur = true
 focus-follows-mouse = true
 
 font-family = "Fira Code Medium"
-font-size = 14
+font-size = 16
 font-feature = -liga,-calt,-dlig

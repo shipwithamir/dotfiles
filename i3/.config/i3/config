@@ -125,6 +125,7 @@ exec --no-startup-id xrandr --output HDMI-0 --mode 1920x1080 --rate 120
 exec --no-startup-id feh --bg-scale --randomize ~/Pictures/wallpapers/*
 exec --no-startup-id sh ~/.fehbg
 exec --no-startup-id dunst
+exec ~/scripts/caps_to_esc
 
 exec_always --no-startup-id autotiling
 exec_always --no-startup-id $HOME/.config/polybar/launch.sh
@@ -142,8 +143,8 @@ bindsym $mod+w exec "feh --bg-scale --randomize ~/Pictures/backgrounds/*"
 bindsym $mod+Shift+c exec ~/scripts/caps_to_esc
 
 # Scripts
-bindsym $mod+comma exec --no-startup-id ~/scripts/brightness down
-bindsym $mod+period exec --no-startup-id ~/scripts/brightness up
+bindsym $mod+Control+comma exec --no-startup-id ~/scripts/brightness down
+bindsym $mod+Control+period exec --no-startup-id ~/scripts/brightness up
 bindsym $mod+Shift+s exec --no-startup-id ~/scripts/screenshot
 bindsym $mod+Shift+d exec --no-startup-id ~/scripts/define_word
 bindsym $mod+Shift+i exec --no-startup-id bash -c 'pgrep -x btop >/dev/null && pkill -x btop || ghostty -e btop'
