@@ -7,7 +7,7 @@ window-padding-x = 0
 window-padding-y = 0
 # font-size = 14
 cursor-invert-fg-bg = true
-background-opacity = 0.95
+background-opacity = 1
 background-blur = true
 focus-follows-mouse = true
 

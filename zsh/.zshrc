@@ -7,6 +7,7 @@ export PATH="$HOME/.npm-global/bin:$PATH"
 export NVM_DIR="$HOME/.nvm"
 export TERMINAL="ghostty"
 export ZSH="$HOME/.oh-my-zsh"
+export EDITOR=nvim
 
 # ------------------------------------------
 # Oh My Zsh + Theme + Plugins
