@@ -29,8 +29,6 @@ bindsym $mod+Ctrl+l resize grow width 10 px or 10 ppt
 bindsym $mod+Ctrl+j resize grow height 10 px or 10 ppt
 bindsym $mod+Ctrl+k resize shrink height 10 px or 10 ppt
 
-for_window [class="steam_proton"] floating disable, fullscreen enable
-for_window [window_type="normal"] floating disable
 
 # Floating windows
 floating_modifier $mod
@@ -115,6 +113,9 @@ default_border pixel 2
 hide_edge_borders smart
 
 for_window [class="ghostty"] border pixel 2
+for_window [class="(?i)genshinimpact.exe"] border none, fullscreen enable, floating disable
+for_window [class="steam_proton"] floating disable, fullscreen enable
+for_window [window_type="normal"] floating disable
 
 # Autostart applications
 exec --no-startup-id dex --autostart --environment i3
@@ -126,6 +127,7 @@ exec --no-startup-id feh --bg-scale --randomize ~/Pictures/wallpapers/*
 exec --no-startup-id sh ~/.fehbg
 exec --no-startup-id dunst
 exec ~/scripts/caps_to_esc
+exec --no-startup-id /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
 
 exec_always --no-startup-id autotiling
 exec_always --no-startup-id $HOME/.config/polybar/launch.sh
