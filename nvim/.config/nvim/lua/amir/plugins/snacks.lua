@@ -23,7 +23,7 @@ return {
       enabled = true,
       hidden = true,
       ignored = true,
-      exclude = { "node_modules", ".git", ".next", ".dist", "venv", ".venv", "dist" },
+      exclude = { "node_modules", ".git", ".next", ".dist", "venv", ".venv", "dist", ".agent*" },
     },
     quickfile = { enabled = true },
     scope = { enabled = true },

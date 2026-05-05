@@ -112,8 +112,11 @@ smart_gaps on
 default_border pixel 2
 hide_edge_borders smart
 
+
+for_window [class="GenshinImpact.exe"] floating enable, border none, focus
+for_window [title="Genshin Impact"] floating enable, border none
+
 for_window [class="ghostty"] border pixel 2
-for_window [class="(?i)genshinimpact.exe"] border none, fullscreen enable, floating disable
 for_window [class="steam_proton"] floating disable, fullscreen enable
 for_window [window_type="normal"] floating disable
 
