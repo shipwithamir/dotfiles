@@ -105,3 +105,8 @@ export PNPM_HOME="$HOME/.local/share/pnpm"
 export PATH="$PNPM_HOME:$PATH"
 
 . "$HOME/.turso/env"
+
+. "$HOME/.local/bin/env"
+
+# opencode
+export PATH=/home/azmir/.opencode/bin:$PATH

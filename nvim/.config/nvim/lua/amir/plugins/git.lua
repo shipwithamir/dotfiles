@@ -1,6 +1,14 @@
 return {
   -- git fugitive greatest ever
   { "tpope/vim-fugitive" },
+
+  -- codediff
+
+  {
+    "esmuellert/codediff.nvim",
+    cmd = "CodeDiff",
+  },
+
   -- git signs
   {
     "lewis6991/gitsigns.nvim",
