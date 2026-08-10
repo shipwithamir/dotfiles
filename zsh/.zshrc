@@ -35,11 +35,6 @@ source /usr/share/fzf/key-bindings.zsh
 eval "$(zoxide init zsh)"
 
 # ------------------------------------------
-# Key bindings
-# ------------------------------------------
-bindkey -s ^f "~/scripts/tmux-sessionizer\n"
-
-# ------------------------------------------
 # Aliases
 # ------------------------------------------
 
@@ -110,3 +105,7 @@ export PATH="$PNPM_HOME:$PATH"
 
 # opencode
 export PATH=/home/azmir/.opencode/bin:$PATH
+
+
+export PATH="/home/azmir/.local/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$PATH"
