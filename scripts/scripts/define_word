@@ -1,20 +1,41 @@
 #!/usr/bin/env bash
 
-word=${1:-$(xclip -o -selection primary 2>/dev/null || wl-paste 2>/dev/null)}
+# Deps: curl, jq, xclip (or wl-paste on Wayland), notify-send + notification daemon (dunst)
+for cmd in curl jq notify-send; do
+    command -v "$cmd" >/dev/null 2>&1 || { notify-send -h string:bgcolor:#bf616a -t 3000 "Missing dependency: $cmd."; exit 1; }
+done
+
+if [ -n "$1" ]; then
+    word="$1"
+else
+    # Primary selection first (highlight), then clipboard (Ctrl+C) fallback
+    word=$(xclip -o -selection primary 2>/dev/null || xclip -o -selection clipboard 2>/dev/null || wl-paste 2>/dev/null || true)
+fi
+
+# Trim leading/trailing whitespace and newlines, keep only first line/word
+word=$(printf '%s' "$word" | head -n 1 | xargs 2>/dev/null || printf '%s' "$word")
+# Take first word only (avoid sentences breaking the URL)
+word=${word%% *}
 
 # Check for empty word or special characters
 [[ -z "$word" || "$word" =~ [\/] ]] && notify-send -h string:bgcolor:#bf616a -t 3000 "Invalid input." && exit 0
 
-query=$(curl -s --connect-timeout 5 --max-time 10 "https://api.dictionaryapi.dev/api/v2/entries/en_US/$word")
+# URL-encode the word (handles spaces etc.)
+enc_word=$(jq -rn --arg w "$word" '$w|@uri')
 
-# Check for connection error (curl exit status stored in $?)
-[ $? -ne 0 ] && notify-send -h string:bgcolor:#bf616a -t 3000 "Connection error." && exit 1
+query=$(curl -sS -f --connect-timeout 5 --max-time 10 --retry 1 "https://freedictionaryapi.com/api/v1/entries/en/$enc_word")
+curl_exit=$?
 
-# Check for invalid word response
-[[ "$query" == *"No Definitions Found"* ]] && notify-send -h string:bgcolor:#bf616a -t 3000 "Invalid word." && exit 0
+# Check for connection error
+[ $curl_exit -ne 0 ] && notify-send -h string:bgcolor:#bf616a -t 3000 "Connection error." && exit 1
+
+# Check for invalid word response (new API returns 200 with empty entries array)
+if [[ "$query" == *"No Definitions Found"* ]] || echo "$query" | jq -e '.entries | length == 0' >/dev/null 2>&1; then
+    notify-send -h string:bgcolor:#bf616a -t 3000 "Invalid word." && exit 0
+fi
 
 # Show only first 3 definitions
-def=$(echo "$query" | jq -r '[.[].meanings[] | {pos: .partOfSpeech, def: .definitions[].definition}] | .[:3].[] | "\n\(.pos). \(.def)"')
+def=$(echo "$query" | jq -r '[.entries[] | {pos: .partOfSpeech, def: .senses[].definition}] | .[:3].[] | "\n\(.pos). \(.def)"')
 
 # Requires a notification daemon to be installed
 notify-send -t 60000 "$word -" "$def"
@@ -22,11 +43,11 @@ notify-send -t 60000 "$word -" "$def"
 
 ### MORE OPTIONS :)
 
-# Show first definition for each part of speech (thanks @morgengabe1 on youtube)
-# def=$(echo "$query" | jq -r '.[0].meanings[] | "\(.partOfSpeech): \(.definitions[0].definition)\n"')
+# Show first definition for each part of speech
+# def=$(echo "$query" | jq -r '.entries[] | "\(.partOfSpeech): \(.senses[0].definition)\n"')
 
 # Show all definitions
-# def=$(echo "$query" | jq -r '.[].meanings[] | "\n\(.partOfSpeech). \(.definitions[].definition)"')
+# def=$(echo "$query" | jq -r '.entries[] | "\n\(.partOfSpeech). \(.senses[].definition)"')
 
 # Regex + grep for just definition, if anyone prefers that to jq
 # def=$(grep -Po '"definition":"\K(.*?)(?=")' <<< "$query")

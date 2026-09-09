@@ -5,51 +5,114 @@ RECORD_DIR="$HOME/Videos/recording"
 PID_FILE="/tmp/record_game.pid"
 STATUS_FILE="/tmp/record_game.status"
 META_FILE="/tmp/record_game.meta"
+LOG_FILE="/tmp/record.log"
 
 start_recording() {
     if [[ -f "$PID_FILE" ]]; then
-        echo "Recording already in progress."
-        exit 1
+        PID=$(cat "$PID_FILE" 2>/dev/null)
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "Recording already in progress (PID $PID)."
+            exit 1
+        else
+            echo "Removing stale PID file."
+            rm -f "$PID_FILE" "$META_FILE"
+        fi
     fi
 
     DATE=$(date +"%Y-%m-%d")
     TIME=$(date +"%H-%M-%S")
     OUTPUT_DIR="$RECORD_DIR/$DATE"
-    mkdir -p "$OUTPUT_DIR"
+    mkdir -p "$OUTPUT_DIR" || { echo "Failed to create $OUTPUT_DIR"; exit 1; }
 
     VIDEO_FILE="$OUTPUT_DIR/recording_${TIME}.mkv"
     AUDIO_FILE="$OUTPUT_DIR/audio_${TIME}.wav"
 
-    SYSTEM_AUDIO=$(pactl get-default-sink)
-    MIC_SOURCE=$(pactl get-default-source)
-    SCREEN_SIZE=$(xrandr | awk '/\*/ {print $1; exit}')
+    SYSTEM_AUDIO=$(pactl get-default-sink 2>/dev/null)
+    MIC_SOURCE=$(pactl get-default-source 2>/dev/null)
+    SCREEN_SIZE=$(xrandr --current 2>/dev/null | awk '/\*/ {print $1; exit}')
     FPS=60
 
+    # Validation
+    if [[ -z "$SCREEN_SIZE" ]] || ! [[ "$SCREEN_SIZE" =~ ^[0-9]+x[0-9]+$ ]]; then
+        echo "Failed to detect screen size, falling back to 1920x1080" | tee -a "$LOG_FILE"
+        SCREEN_SIZE="1920x1080"
+    fi
+    if [[ -z "$SYSTEM_AUDIO" ]]; then
+        echo "Failed to get default sink" | tee -a "$LOG_FILE"
+        exit 1
+    fi
+    if [[ -z "$MIC_SOURCE" ]]; then
+        echo "Warning: no mic source found, recording system audio only" | tee -a "$LOG_FILE"
+    fi
+    if ! command -v ffmpeg >/dev/null 2>&1; then
+        echo "ffmpeg not found"
+        exit 1
+    fi
+
     echo "$VIDEO_FILE|$AUDIO_FILE" > "$META_FILE"
+    : > "$LOG_FILE"
 
-    ffmpeg -y \
-        -video_size "$SCREEN_SIZE" \
-        -framerate "$FPS" \
-        -f x11grab -i :0.0 \
-        -f pulse -i "$SYSTEM_AUDIO.monitor" \
-        -f pulse -i "$MIC_SOURCE" \
-        -filter_complex "
-            [2:a]afftdn=nf=-25[mic_nc];
-            [1:a][mic_nc]amix=inputs=2:duration=longest[a_mix]
-        " \
-        -map 0:v \
-        -map "[a_mix]" \
-        -c:v h264_nvenc -preset p5 -rc vbr -b:v 25M -maxrate 40M -bufsize 80M -pix_fmt yuv420p \
-        -c:a aac -b:a 192k \
-        -vsync 1 -async 1 \
-        "$VIDEO_FILE" \
-        > /dev/null 2>&1 &
+    # Choose encoder: prefer h264_nvenc if available, fallback to libx264
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q "h264_nvenc"; then
+        VIDEO_CODEC_ARGS=(-c:v h264_nvenc -preset p5 -rc vbr -b:v 25M -maxrate 40M -bufsize 80M -pix_fmt yuv420p)
+    else
+        echo "h264_nvenc not available, falling back to libx264" | tee -a "$LOG_FILE"
+        VIDEO_CODEC_ARGS=(-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p)
+    fi
 
-    echo $! > "$PID_FILE"
+    # Build ffmpeg command - handle missing mic gracefully
+    if [[ -n "$MIC_SOURCE" ]] && pactl list sources short 2>/dev/null | grep -q "$MIC_SOURCE"; then
+        ffmpeg -y \
+            -video_size "$SCREEN_SIZE" \
+            -framerate "$FPS" \
+            -f x11grab -i :0.0 \
+            -f pulse -i "$SYSTEM_AUDIO.monitor" \
+            -f pulse -i "$MIC_SOURCE" \
+            -filter_complex "
+                [2:a]afftdn=nf=-25[mic_nc];
+                [1:a][mic_nc]amix=inputs=2:duration=longest[a_mix]
+            " \
+            -map 0:v \
+            -map "[a_mix]" \
+            "${VIDEO_CODEC_ARGS[@]}" \
+            -c:a aac -b:a 192k \
+            "$VIDEO_FILE" \
+            >> "$LOG_FILE" 2>&1 &
+    else
+        # No mic: only system audio
+        ffmpeg -y \
+            -video_size "$SCREEN_SIZE" \
+            -framerate "$FPS" \
+            -f x11grab -i :0.0 \
+            -f pulse -i "$SYSTEM_AUDIO.monitor" \
+            -map 0:v \
+            -map 1:a \
+            "${VIDEO_CODEC_ARGS[@]}" \
+            -c:a aac -b:a 192k \
+            "$VIDEO_FILE" \
+            >> "$LOG_FILE" 2>&1 &
+    fi
+
+    FFMPEG_PID=$!
+    echo $FFMPEG_PID > "$PID_FILE"
+
+    # Verify ffmpeg actually started
+    sleep 0.8
+    if ! kill -0 "$FFMPEG_PID" 2>/dev/null; then
+        echo "ffmpeg failed to start. Check $LOG_FILE" | tee -a "$LOG_FILE"
+        echo "--- ffmpeg log ---"
+        cat "$LOG_FILE"
+        rm -f "$PID_FILE" "$META_FILE"
+        # Remove empty file if created
+        [[ -f "$VIDEO_FILE" ]] && [[ ! -s "$VIDEO_FILE" ]] && rm -f "$VIDEO_FILE"
+        exit 1
+    fi
+
     echo "recording" > "$STATUS_FILE"
 
-    echo "Recording started:"
+    echo "Recording started (PID $FFMPEG_PID):"
     echo "Video: $VIDEO_FILE"
+    echo "Log: $LOG_FILE"
 }
 
 stop_recording() {
@@ -58,31 +121,93 @@ stop_recording() {
         return
     fi
 
-    kill -2 "$(cat "$PID_FILE")"
-    wait "$(cat "$PID_FILE")" 2>/dev/null
+    PID=$(cat "$PID_FILE" 2>/dev/null)
+    META_EXISTS=0
+    VIDEO_FILE=""
+    AUDIO_FILE=""
+    if [[ -f "$META_FILE" ]]; then
+        IFS="|" read -r VIDEO_FILE AUDIO_FILE < "$META_FILE"
+        META_EXISTS=1
+    fi
+
+    if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
+        # Graceful stop: SIGINT is the proper way for ffmpeg to finalize the file
+        kill -INT "$PID" 2>/dev/null || kill -2 "$PID" 2>/dev/null
+        # Wait up to 6 seconds for ffmpeg to flush and exit
+        for _ in {1..30}; do
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 0.2
+        done
+        # Force kill if still running
+        if kill -0 "$PID" 2>/dev/null; then
+            echo "ffmpeg did not exit, sending SIGTERM..."
+            kill -TERM "$PID" 2>/dev/null
+            sleep 1
+            kill -KILL "$PID" 2>/dev/null || true
+        fi
+        wait "$PID" 2>/dev/null || true
+    else
+        echo "PID $PID not running (stale)."
+    fi
 
     rm -f "$PID_FILE"
     echo "stopped" > "$STATUS_FILE"
 
-    IFS="|" read -r VIDEO_FILE AUDIO_FILE < "$META_FILE"
-    rm -f "$META_FILE"
+    if [[ $META_EXISTS -eq 1 ]]; then
+        rm -f "$META_FILE"
+    fi
 
-    ffmpeg -y \
-        -i "$VIDEO_FILE" \
-        -vn \
-        -acodec pcm_s16le \
-        "$AUDIO_FILE" \
-        > /dev/null 2>&1
+    if [[ -z "$VIDEO_FILE" ]]; then
+        echo "No video file recorded (meta missing)."
+        return
+    fi
+
+    if [[ ! -f "$VIDEO_FILE" ]]; then
+        echo "Video file not found: $VIDEO_FILE"
+        echo "Check log: $LOG_FILE"
+        cat "$LOG_FILE" 2>/dev/null | tail -n 50
+        return
+    fi
+
+    if [[ ! -s "$VIDEO_FILE" ]]; then
+        echo "Video file is empty (ffmpeg likely crashed). Check $LOG_FILE"
+        cat "$LOG_FILE" 2>/dev/null | tail -n 100
+        rm -f "$VIDEO_FILE"
+        return
+    fi
 
     echo "Recording stopped."
-    echo "Extracted audio: $AUDIO_FILE"
+    echo "Video saved: $VIDEO_FILE (size: $(du -h "$VIDEO_FILE" | cut -f1))"
+
+    # Optional: extract separate wav (only if video is valid)
+    if [[ -n "$AUDIO_FILE" ]]; then
+        if ffmpeg -y -i "$VIDEO_FILE" -vn -c:a pcm_s16le "$AUDIO_FILE" >> "$LOG_FILE" 2>&1; then
+            echo "Extracted audio: $AUDIO_FILE"
+        else
+            echo "Audio extraction failed (video may have no audio). Check $LOG_FILE"
+        fi
+    fi
 }
 
 status() {
     if [[ -f "$PID_FILE" ]]; then
-        echo "%{F#FF0000}%{F-} REC"
+        PID=$(cat "$PID_FILE" 2>/dev/null)
+        if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
+            echo "%{F#FF0000}%{F-} REC"
+            return
+        else
+            # stale pid file
+            rm -f "$PID_FILE"
+        fi
+    fi
+    echo " idle"
+}
+
+toggle() {
+    if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+        stop_recording
     else
-        echo " idle"
+        start_recording
     fi
 }
 
@@ -90,5 +215,6 @@ case "$1" in
     start) start_recording ;;
     stop) stop_recording ;;
     status) status ;;
-    *) echo "Usage: $0 {start|stop|status}" ;;
+    toggle) toggle ;;
+    *) echo "Usage: $0 {start|stop|status|toggle}" ;;
 esac
